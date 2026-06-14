@@ -1,0 +1,16 @@
+.env
+logs/
+unverified/
+failed/
+
+__pycache__/
+.pytest_cache/
+
+# old testing log files
+failed_ids.txt
+ids.txt
+rightlight.txt
+unverified_ids.txt
+
+# test program
+exif.py
