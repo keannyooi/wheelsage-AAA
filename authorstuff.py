@@ -4,11 +4,10 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
 from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
-from PIL import Image
-from PIL.ExifTags import TAGS
+from exifread import process_file
 from ftfy import fix_text
 
-RUN_HEADLESS = True # set False to see the browser
+RUN_HEADLESS = False # set False to see the browser
 
 # command line argument validation before everything else is run
 if len(sys.argv) < 3:
@@ -33,11 +32,13 @@ exif_search_list = [ # these copyright blocks trigger a deeper EXIF search
     "Mercedes-Benz Group AG",
     "FerreroCommunication",
     "Scania CV AB",
-    "Motroring Media Network"
+    "Scania-CV-AB",
+    "Motroring Media Network",
+    "Wishart Media"
 ]
 
 RM_SOTHEBYS_REGEX = r"((©( )?\d{4} (Co(u)?rtesy of )?)|\/)RM ((Sotheby(')?s)|Auctions)"
-DAIMLER_REGEX = r"(© )?(Mercedes-Benz|(Daimler( Truck)?))( AG)?"
+DAIMLER_REGEX = r"(© )?(Mercedes-Benz|(Daimler( Truck)?))( Group)?( AG)?"
 
 def search_author_dict(copyright_text: str) -> tuple:
     text = copyright_text
@@ -70,24 +71,17 @@ def get_exif_author_from_link(url: str, default: str) -> str:
         
         # Load the bytes into an in-memory file-like object
         image_bytes = io.BytesIO(response.content)
+
+        tags = process_file(image_bytes, extract_thumbnail=False)
         
-        # Open the image with Pillow
-        with Image.open(image_bytes) as img:
-            # Extract raw EXIF data
-            exif_data = img.getexif()
-            if not exif_data:
-                print("No EXIF metadata found in this image.")
-                return default
-            
-            for tag_id, value in exif_data.items():
-                tag_name = TAGS.get(tag_id, tag_id)
-                if tag_name == "Artist":
-                    value = fix_text(value) # fix mojibake from misinterpreted characters
-                    print(f"Artist according to EXIF: {value}")
-                    return value
-            
-            print("No Artist field found, moving on...")
-            return default
+        for tag, value in tags.items():
+            if tag == "Image Artist":
+                value = fix_text(str(value)) # fix mojibake from misinterpreted characters
+                print(f"Artist according to EXIF: {value}")
+                return value
+        
+        print("No Artist field found, moving on...")
+        return default
     except requests.exceptions.RequestException as e:
         print(f"Network error, returning None: {e}")
         logging.info(f"ERROR   | Network error, returning None: {e}")
