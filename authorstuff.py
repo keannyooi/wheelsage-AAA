@@ -23,10 +23,12 @@ except ValueError:
     print("Error: Please provide valid numeric image IDs")
     sys.exit(1)
 
-# author copyright dictionary
-# dynamic list of special-case copyright text which would need conversion, will keep on adding stuff here
+# load author copyright dictionary (authors.json)
 author_dict = json.load(open("authors.json", "r", encoding="utf-8"))
-exif_search_list = [ # these copyright blocks trigger a deeper EXIF search
+author_key_list = list(author_dict.keys())
+# author matching searches from longest key length to shortest to eliminate false positives from short copyright text
+author_key_list.sort(key=len, reverse=True)
+exif_search_list = [ # these copyright texts trigger a deeper EXIF search
     "Daimler Truck",
     "Mercedes-Benz( Group)? AG",
     "FerreroCommunication",
@@ -38,6 +40,7 @@ exif_search_list = [ # these copyright blocks trigger a deeper EXIF search
     "RIGHTLIGHT Media"
 ]
 
+# custom regexes for detecting copyright blocks
 RM_SOTHEBYS_REGEX = r"((©( )?\d{4} (Co(u)?rtesy of )?)|\/)RM ((Sotheby(')?s)|Auctions)"
 DAIMLER_REGEX = r"(© )?(Mercedes-Benz|(Daimler( Truck)?))( Group)?( AG)?"
 
@@ -57,7 +60,7 @@ def search_author_dict(copyright_text: str) -> tuple:
         return text, copyright_block
 
     # search for the copyright text in the author_dict keys (case-insensitive)
-    for key in author_dict.keys():
+    for key in author_key_list:
         if key.lower() in text.lower(): 
             return author_dict[key], copyright_block
     
