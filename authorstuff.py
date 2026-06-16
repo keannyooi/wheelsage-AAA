@@ -28,13 +28,14 @@ except ValueError:
 author_dict = json.load(open("authors.json", "r", encoding="utf-8"))
 exif_search_list = [ # these copyright blocks trigger a deeper EXIF search
     "Daimler Truck",
-    "Mercedes-Benz AG",
-    "Mercedes-Benz Group AG",
+    "Mercedes-Benz( Group)? AG",
     "FerreroCommunication",
     "Scania CV AB",
     "Scania-CV-AB",
-    "Motroring Media Network",
-    "Wishart Media"
+    "Motoring Media Network",
+    "Wishart Media",
+    "Visio Imaging S.B.",
+    "RIGHTLIGHT Media"
 ]
 
 RM_SOTHEBYS_REGEX = r"((©( )?\d{4} (Co(u)?rtesy of )?)|\/)RM ((Sotheby(')?s)|Auctions)"
@@ -69,19 +70,29 @@ def get_exif_author_from_link(url: str, default: str) -> str:
         # check HTTP response code, throws error if 4xx / 5xx
         response.raise_for_status()
         
-        # Load the bytes into an in-memory file-like object
-        image_bytes = io.BytesIO(response.content)
-
-        tags = process_file(image_bytes, extract_thumbnail=False)
-        
-        for tag, value in tags.items():
-            if tag == "Image Artist":
-                value = fix_text(str(value)) # fix mojibake from misinterpreted characters
-                print(f"Artist according to EXIF: {value}")
-                return value
-        
-        print("No Artist field found, moving on...")
-        return default
+        with io.BytesIO() as image_bytes:
+            bytes_read = 0
+            max_bytes = 1048576  # 1MB should be more than enough for EXIF
+            
+            for chunk in response.iter_content(chunk_size=8192):
+                image_bytes.write(chunk)
+                bytes_read += len(chunk)
+                
+                # Stop reading after we have enough
+                if bytes_read >= max_bytes:
+                    break
+            
+            image_bytes.seek(0)
+            tags = process_file(image_bytes, extract_thumbnail=False)
+            
+            for tag, value in tags.items():
+                if tag == "Image Artist":
+                    value = fix_text(str(value)) # fix mojibake from misinterpreted characters
+                    print(f"Artist according to EXIF: {value}")
+                    return value
+            
+            print("No Artist field found, moving on...")
+            return default
     except requests.exceptions.RequestException as e:
         print(f"Network error, returning None: {e}")
         logging.info(f"ERROR   | Network error, returning None: {e}")
@@ -155,8 +166,9 @@ def run(playwright: Playwright) -> None:
             
             # search for text if copyright text is in exif_search_list
             for keyword in exif_search_list:
-                if keyword.lower() in current_copyright.lower():
+                if re.search(rf"{keyword.lower()}", current_copyright.lower()):
                     current_copyright += " " + get_exif_author_from_link(current_pic_link, current_copyright)
+                    break
             
             # resolve author name from copyright info using author_dict
             current_author, current_copyright_block = search_author_dict(current_copyright)
