@@ -1,5 +1,6 @@
 .env
 logs/
+category_ids/
 unverified/
 failed/
 

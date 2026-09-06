@@ -16,33 +16,82 @@ if len(sys.argv) < 3:
 try:
     begin_pic_id = int(sys.argv[1])
     end_pic_id = int(sys.argv[2])
-    if begin_pic_id < end_pic_id:
-        print("Error: begin_pic_id should be greater than or equal to end_pic_id")
-        sys.exit(1)
+    direction = 1 if begin_pic_id < end_pic_id else -1
 except ValueError:
     print("Error: Please provide valid numeric image IDs")
     sys.exit(1)
+
+# custom regexes for detecting copyright blocks
+RM_SOTHEBYS_REGEX = r"((©( )?\d{4} (Co(u)?rtesy of )?)|\/)RM ((Sotheby(')?s)|(Auctions( Inc.)?))"
+DAIMLER_REGEX = r"(© )?(Mercedes-Benz|(Daimler( Truck)?( Buses GmbH)?))( Group)?( AG)?"
 
 # load author copyright dictionary (authors.json)
 author_dict = json.load(open("authors.json", "r", encoding="utf-8"))
 author_key_list = list(author_dict.keys())
 # author matching searches from longest key length to shortest to eliminate false positives from short copyright text
 author_key_list.sort(key=len, reverse=True)
-exif_search_list = [ # these copyright texts trigger a deeper EXIF search
-    "Daimler Truck",
-    "Mercedes-Benz( Group)? AG",
+loose_exif_search_list = [ # these copyright texts trigger a deeper EXIF search
+    DAIMLER_REGEX,
     "FerreroCommunication",
-    "Scania CV AB",
-    "Scania-CV-AB",
-    "Motoring Media Network",
+    "Scania(-| )CV(-| )AB",
+    "Mot(r)?oring Media Network",
     "Wishart Media",
     "Visio Imaging S.B.",
-    "RIGHTLIGHT Media"
+    "RIGHTLIGHT Media",
+    "StudioRGB",
+    "SIX(.|:)TRENTE",
+    "DC Multimidia",
+    "(© )?Volvo Cars( AB)?",
+    "Bovensiepen( Automobile)? GmbH \+ Co. KG",
+    "GEMBALLA GmbH",
+    "Lexus Canada, a division of Toyota Canada Inc.",
+    "MAN Nutzfahrzeuge",
+    "MAN Truck & Bus",
+    " - free for editorial use only",
+    "©Black Cygnus Limited",
+    "info@motorsportimages.com"
 ]
-
-# custom regexes for detecting copyright blocks
-RM_SOTHEBYS_REGEX = r"((©( )?\d{4} (Co(u)?rtesy of )?)|\/)RM ((Sotheby(')?s)|Auctions)"
-DAIMLER_REGEX = r"(© )?(Mercedes-Benz|(Daimler( Truck)?))( Group)?( AG)?"
+tight_exif_search_list = [ # same as the one above but for exact matches only, to avoid false positives from short copyright text
+    "All rights reserved(.)?",
+    "Copyright(s)?( )?[0-9]{4}",
+    "Tous droits reserves",
+    "CONTRAST GROUP",
+    "armando",
+    "(©)?( )?AUDI AG",
+    "Legal copyright owner",
+    "Split Image Multimedia Pty Ltd",
+    "CLICK-ART.IT",
+    "(©)?( )?Porsche AG",
+    "PAGANI AUTOMOBILI",
+    "Adam Opel AG",
+    "Opel PR",
+    "COPYRIGHT_[0-9]{4}",
+    "WWW.PBLOK.COM",
+    "Copyright Astuce Productions",
+    "[0-9]{4}",
+    "©( )?[0-9]{4} (Acura|Honda)",
+    "LaPresse",
+    "@actcreative",
+    "ACTcreative",
+    "© Polestar",
+    "Presse, PR, Social Media",
+    "Copyright",
+    "[0-9]{2}/20[0-9]{2}",
+    "©( )?[0-9]{4} Mitsubishi",
+    "©( )?[0-9]{4} Peugeot",
+    "BMW North America(n)? [0-9]{4}(.)?",
+    "© Free for editorial use only",
+    "BMW_[0-9]{2}_[0-9]{4}",
+    "Jaguar Land Rover_[0-9]{4}",
+    "Copyright BMW AG.\nFor press purposes only.",
+    "BMW AG",
+    "Foto Factory",
+    "MG Australia",
+    "Editorial Use only",
+    "Filmpoint",
+    "Volkswagen Nutzfahrzeuge"
+]
+# TODO: look into sanitizing strings
 
 def search_author_dict(copyright_text: str) -> tuple:
     text = copyright_text
@@ -61,6 +110,7 @@ def search_author_dict(copyright_text: str) -> tuple:
 
     # search for the copyright text in the author_dict keys (case-insensitive)
     for key in author_key_list:
+        # print(key, text)
         if key.lower() in text.lower(): 
             return author_dict[key], copyright_block
     
@@ -107,7 +157,10 @@ def get_exif_author_from_link(url: str, default: str) -> str:
         return default
 
 def to_next_id(page: Page, current_pic_id: int):
-    page.get_by_role("link", name="<< previous", exact=True).click()
+    if direction == 1:
+        page.get_by_role("link", name="next >>", exact=True).click()
+    else:
+        page.get_by_role("link", name="<< previous", exact=True).click()
     page.wait_for_function(
         """(oldId) => {
             const divs = document.querySelectorAll('.card-body > div');
@@ -146,7 +199,7 @@ def run(playwright: Playwright) -> None:
     current_pic_id = int(re.search(r'/pictures/(\d+)', page.url).group(1)) # ids may skip due to deleted pictures no longer existing
 
     previous_author = None
-    while current_pic_id >= end_pic_id:
+    while (direction == 1 and current_pic_id <= end_pic_id) or (direction == -1 and current_pic_id >= end_pic_id):
         try:
             # check copyright field
             current_copyright = page.locator("textarea").input_value().strip() # text fields use input_value instead of text_content
@@ -167,11 +220,26 @@ def run(playwright: Playwright) -> None:
                 to_next_id(page, current_pic_id)
                 continue
             
-            # search for text if copyright text is in exif_search_list
-            for keyword in exif_search_list:
-                if re.search(rf"{keyword.lower()}", current_copyright.lower()):
-                    current_copyright += " " + get_exif_author_from_link(current_pic_link, current_copyright)
-                    break
+            if len(current_copyright) < 3 and len(current_copyright) > 0:
+                # copyright text too generic, look further in EXIF metadata
+                current_copyright += " " + get_exif_author_from_link(current_pic_link, current_copyright)
+            else:
+                is_exif_matched = False
+
+                # first search for exact matches if copyright text is in tight_exif_search_list
+                for keyword in tight_exif_search_list:
+                    if re.fullmatch(rf"{keyword.lower()}", current_copyright.lower()):
+                        current_copyright += " " + get_exif_author_from_link(current_pic_link, current_copyright)
+                        is_exif_matched = True
+                        break
+                
+                if not is_exif_matched:
+                    # then search for text if copyright text is in loose_exif_search_list
+                    for keyword in loose_exif_search_list:
+                        if re.search(rf"{keyword.lower()}", current_copyright.lower()):
+                            current_copyright += " " + get_exif_author_from_link(current_pic_link, current_copyright)
+                            is_exif_matched = True
+                            break
             
             # resolve author name from copyright info using author_dict
             current_author, current_copyright_block = search_author_dict(current_copyright)
@@ -311,7 +379,7 @@ def handle_pic_author(page: Page, current_pic_id: int, previous_author: str, cur
         if len(current_copyright_block) > 0:
             # additional copyright stuff
             page.get_by_role("link", name="add to …").click()
-            page.get_by_role("link", name="Copyright blocks").click()
+            page.get_by_role("link", name="Copyright holders").click()
             page.get_by_role("button", name=current_copyright_block).click()
 
         logging.info(f"SUCCESS | Image ID {current_pic_id} assigned to {current_author}")
@@ -332,7 +400,7 @@ def handle_pic_author(page: Page, current_pic_id: int, previous_author: str, cur
 def clear_copyright_field(page: Page):
     page.wait_for_selector("textarea", state="visible") # wait for the move picture form to close
     page.locator("textarea").clear()
-    page.get_by_role("button", name="Submit").last.click()
+    page.locator(".mb-4>button").first.click()
 
 with sync_playwright() as playwright:
     run(playwright)

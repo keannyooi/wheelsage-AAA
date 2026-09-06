@@ -56,7 +56,7 @@ def run(playwright: Playwright) -> None:
 
     is_first_id = True
     for id in id_list:
-        page.goto(f"https://en.wheelsage.org/moder/pictures/{id}")
+        page.goto(f"https://en.wheelsage.org/moder/pictures/{id}/move?show_authors=1")
         print(f"Assigning author {author_name} to image ID {id}...", end="")
         logging.info(f"TARGET  | Assigning author {author_name} to image ID {id}...")
         
@@ -81,9 +81,6 @@ def handle_pic_author(page: Page, current_pic_id: int, current_copyright: str):
     # case 2: search for author in the website using the copyright info
     search_completed = False
     while not search_completed:
-        page.get_by_role("link", name="add to …").click() # go to "Move picture" page
-        page.get_by_role("link", name=" (author)").click() # go to authors tab
-
         try:
             page.wait_for_selector("app-paginator", state="visible")
             page.get_by_role("textbox", name="Type to search …").fill(current_copyright) # fill in the search field
